@@ -1,0 +1,204 @@
+import { useState, useCallback, useEffect } from 'react';
+import { generatePlaylistHash } from '../services/utils/hash';
+
+const STORAGE_KEY = 'nabbit_transfer_history';
+
+export const useTransfer = (spotifyPlaylists, youtubePlaylists, spotifyGetTracks, youtube) => {
+  const [selectedPlaylists, setSelectedPlaylists] = useState([]);
+  const [transferHistory, setTransferHistory] = useState({});
+  const [transferStatus, setTransferStatus] = useState('idle'); // idle, transferring, complete, error
+  const [progress, setProgress] = useState({ current: 0, total: 0, message: '' });
+  const [duplicates, setDuplicates] = useState([]);
+
+  // Load transfer history from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        setTransferHistory(JSON.parse(saved));
+      } catch (e) {
+        console.error('Failed to load transfer history');
+      }
+    }
+  }, []);
+
+  // Save history when it changes
+  useEffect(() => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(transferHistory));
+  }, [transferHistory]);
+
+  // Check for duplicates when playlists change
+  useEffect(() => {
+    if (!spotifyPlaylists?.items || !transferHistory) return;
+
+    const dupes = spotifyPlaylists.items
+      .filter(playlist => transferHistory[playlist.id])
+      .map(playlist => ({
+        spotifyId: playlist.id,
+        spotifyName: playlist.name,
+        youtubeId: transferHistory[playlist.id].youtubeId,
+        lastTransferred: transferHistory[playlist.id].timestamp,
+        trackCount: playlist.tracks.total,
+        previousTrackCount: transferHistory[playlist.id].trackCount
+      }));
+    
+    setDuplicates(dupes);
+  }, [spotifyPlaylists, transferHistory]);
+
+  const checkForDuplicates = useCallback((playlistId) => {
+    return transferHistory[playlistId] || null;
+  }, [transferHistory]);
+
+  const getDuplicateAction = useCallback((playlistId, preferredAction = 'prompt') => {
+    const history = transferHistory[playlistId];
+    if (!history) return 'new';
+    
+    // Compare track counts to see if playlist changed
+    const spotifyPlaylist = spotifyPlaylists?.items?.find(p => p.id === playlistId);
+    if (!spotifyPlaylist) return 'unknown';
+    
+    const trackCountChanged = spotifyPlaylist.tracks.total !== history.trackCount;
+    
+    if (trackCountChanged) {
+      return preferredAction === 'prompt' ? 'prompt' : preferredAction;
+    }
+    return 'skip'; // Identical playlist, skip by default
+  }, [transferHistory, spotifyPlaylists]);
+
+  const transferPlaylists = useCallback(async (options = {}) => {
+    const {
+      maxSongsPerPlaylist = 50,
+      privacyStatus = 'private',
+      onDuplicate = 'prompt', // 'prompt', 'merge', 'overwrite', 'skip'
+      onProgress = () => {}
+    } = options;
+
+    if (!spotifyPlaylists?.items || selectedPlaylists.length === 0) {
+      return { success: false, message: 'No playlists selected' };
+    }
+
+    setTransferStatus('transferring');
+    const playlistsToTransfer = spotifyPlaylists.items.filter(p => selectedPlaylists.includes(p.id));
+    setProgress({ current: 0, total: playlistsToTransfer.length, message: 'Starting transfer...' });
+
+    const results = {
+      successful: [],
+      failed: [],
+      skipped: [],
+      merged: [],
+      overwritten: []
+    };
+
+    for (let i = 0; i < playlistsToTransfer.length; i++) {
+      const playlist = playlistsToTransfer[i];
+      setProgress({ 
+        current: i, 
+        total: playlistsToTransfer.length, 
+        message: `Processing "${playlist.name}"...` 
+      });
+      onProgress(i, playlistsToTransfer.length, playlist.name);
+
+      try {
+        // Check for existing transfer
+        const existing = transferHistory[playlist.id];
+        let action = 'new';
+        
+        if (existing) {
+          // Compare track counts to see if changed
+          const trackCountChanged = playlist.tracks.total !== existing.trackCount;
+          action = trackCountChanged ? onDuplicate : 'skip';
+          
+          if (action === 'skip') {
+            results.skipped.push(playlist.name);
+            continue;
+          }
+        }
+
+        // Get tracks from Spotify
+        const tracks = await spotifyGetTracks(playlist.id, maxSongsPerPlaylist);
+        const trackList = tracks.map(item => item.track).filter(t => t);
+
+        // Generate hash for this playlist state
+        const playlistHash = generatePlaylistHash(trackList);
+
+        // If existing and hash matches, skip (no changes)
+        if (existing && existing.hash === playlistHash && action !== 'overwrite') {
+          results.skipped.push(playlist.name);
+          continue;
+        }
+
+        // Create or update YouTube playlist
+        let youtubePlaylistId = existing?.youtubeId;
+        
+        if (!youtubePlaylistId || action === 'overwrite') {
+          // Create new playlist (or overwrite by creating new)
+          const description = `Generated by Nabbit\nSource: ${playlist.name}\nSpotify ID: ${playlist.id}\nHash: ${playlistHash}`;
+          const newPlaylist = await youtube.createPlaylist(
+            playlist.name,
+            description,
+            privacyStatus
+          );
+          
+          if (!newPlaylist?.id) {
+            throw new Error('Failed to create YouTube playlist');
+          }
+          
+          youtubePlaylistId = newPlaylist.id;
+        }
+
+        // Add songs to playlist
+        let songsAdded = 0;
+        for (const track of trackList) {
+          const query = `${track.name} ${track.artists[0]?.name || ''}`;
+          const videoId = await youtube.findVideo(query);
+          
+          if (videoId) {
+            const added = await youtube.addVideo(youtubePlaylistId, videoId);
+            if (added) songsAdded++;
+          }
+        }
+
+        // Update history
+        const newHistory = {
+          ...transferHistory,
+          [playlist.id]: {
+            youtubeId: youtubePlaylistId,
+            spotifyName: playlist.name,
+            timestamp: Date.now(),
+            trackCount: playlist.tracks.total,
+            songsTransferred: songsAdded,
+            hash: playlistHash
+          }
+        };
+        setTransferHistory(newHistory);
+
+        if (existing) {
+          results.merged.push(playlist.name);
+        } else {
+          results.successful.push(playlist.name);
+        }
+
+      } catch (error) {
+        console.error(`Failed to transfer ${playlist.name}:`, error);
+        results.failed.push(playlist.name);
+      }
+    }
+
+    setProgress({ current: playlistsToTransfer.length, total: playlistsToTransfer.length, message: 'Complete!' });
+    setTransferStatus('complete');
+    
+    return { success: true, results };
+  }, [spotifyPlaylists, selectedPlaylists, transferHistory, spotifyGetTracks, youtube]);
+
+  return {
+    selectedPlaylists,
+    setSelectedPlaylists,
+    transferHistory,
+    transferStatus,
+    progress,
+    duplicates,
+    checkForDuplicates,
+    getDuplicateAction,
+    transferPlaylists
+  };
+};
