@@ -5,16 +5,23 @@ import {
   Button, 
   Paper, 
   Avatar,
-  Chip
+  Chip,
+  Divider
 } from '@mui/material';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import PlaylistPlayIcon from '@mui/icons-material/PlaylistPlay';
 
 const SpotifySuccess = ({ 
   onNext, 
   onBack, 
   spotifyProfile,
+  spotifyPlaylists,
   clearSpotify 
 }) => {
+  const totalTracks = spotifyPlaylists?.items?.reduce(
+    (sum, p) => sum + (p.tracks?.total || 0), 0
+  ) || 0;
+
   return (
     <Box sx={{ maxWidth: 500, mx: 'auto', mt: 4 }}>
       <Paper sx={{ p: 4, textAlign: 'center' }}>
@@ -60,6 +67,26 @@ const SpotifySuccess = ({
                 label={`${spotifyProfile.followers?.total || 0} followers`} 
                 size="small" 
                 sx={{ mt: 1 }}
+              />
+            </Box>
+          </Box>
+        )}
+
+        {spotifyPlaylists && (
+          <Box sx={{ my: 3 }}>
+            <Divider sx={{ my: 2 }} />
+            <Typography variant="subtitle1" gutterBottom>
+              Your Library
+            </Typography>
+            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2 }}>
+              <Chip 
+                icon={<PlaylistPlayIcon />}
+                label={`${spotifyPlaylists.items.length} playlists`}
+                variant="outlined"
+              />
+              <Chip 
+                label={`${totalTracks} total tracks`}
+                variant="outlined"
               />
             </Box>
           </Box>

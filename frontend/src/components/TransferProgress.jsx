@@ -17,6 +17,7 @@ import ErrorIcon from '@mui/icons-material/Error';
 import SkipNextIcon from '@mui/icons-material/SkipNext';
 import MergeIcon from '@mui/icons-material/Merge';
 import LoopIcon from '@mui/icons-material/Loop';
+import MusicNoteIcon from '@mui/icons-material/MusicNote';
 
 const TransferProgress = ({ 
   transferStatus, 
@@ -48,7 +49,7 @@ const TransferProgress = ({
               {progress.message}
             </Typography>
             <Typography variant="h6" sx={{ mt: 2 }}>
-              {progress.current} of {progress.total} complete
+              {progress.current} of {progress.total} playlists complete
             </Typography>
           </Box>
 

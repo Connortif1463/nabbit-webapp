@@ -12,7 +12,8 @@ import {
   FormControl,
   FormLabel,
   Box,
-  Alert
+  Alert,
+  Chip
 } from '@mui/material';
 
 const DuplicateDialog = ({ 
@@ -25,6 +26,8 @@ const DuplicateDialog = ({
   const [action, setAction] = useState('merge');
 
   if (!playlist) return null;
+
+  const trackDifference = playlist.trackCount - (existingInfo?.trackCount || 0);
 
   const handleConfirm = () => {
     onConfirm(playlist.spotifyId, action);
@@ -43,19 +46,33 @@ const DuplicateDialog = ({
 
         {existingInfo && (
           <Alert severity="info" sx={{ my: 2 }}>
-            Last transferred: {new Date(existingInfo.timestamp).toLocaleDateString()}<br />
-            Previous track count: {existingInfo.trackCount}<br />
-            Current track count: {playlist.trackCount}
-            {playlist.trackCount > existingInfo.trackCount && (
-              <Typography variant="body2" sx={{ mt: 1, color: 'success.main' }}>
-                +{playlist.trackCount - existingInfo.trackCount} new tracks
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+              <Typography variant="body2">
+                Last transferred: {new Date(existingInfo.timestamp).toLocaleDateString()}
               </Typography>
-            )}
-            {playlist.trackCount < existingInfo.trackCount && (
-              <Typography variant="body2" sx={{ mt: 1, color: 'warning.main' }}>
-                {existingInfo.trackCount - playlist.trackCount} tracks removed
+              <Typography variant="body2">
+                Previous track count: {existingInfo.trackCount}
               </Typography>
-            )}
+              <Typography variant="body2">
+                Current track count: {playlist.trackCount}
+              </Typography>
+              {trackDifference > 0 && (
+                <Chip 
+                  label={`+${trackDifference} new tracks`} 
+                  color="success" 
+                  size="small"
+                  sx={{ alignSelf: 'flex-start' }}
+                />
+              )}
+              {trackDifference < 0 && (
+                <Chip 
+                  label={`${trackDifference} tracks removed`} 
+                  color="warning" 
+                  size="small"
+                  sx={{ alignSelf: 'flex-start' }}
+                />
+              )}
+            </Box>
           </Alert>
         )}
 
@@ -65,12 +82,12 @@ const DuplicateDialog = ({
             <FormControlLabel 
               value="merge" 
               control={<Radio />} 
-              label="Merge - Add new songs to existing playlist" 
+              label="Merge - Add new songs to existing playlist (preserves order)" 
             />
             <FormControlLabel 
               value="overwrite" 
               control={<Radio />} 
-              label="Overwrite - Replace entire playlist" 
+              label="Overwrite - Replace entire playlist with current version" 
             />
             <FormControlLabel 
               value="create" 
@@ -87,9 +104,9 @@ const DuplicateDialog = ({
 
         <Box sx={{ mt: 2 }}>
           <Typography variant="body2" color="text.secondary">
-            {action === 'merge' && "Only songs not already in the YouTube playlist will be added."}
-            {action === 'overwrite' && "The existing YouTube playlist will be replaced with the current Spotify version."}
-            {action === 'create' && "A new playlist will be created with the same name (plus ' (2)')."}
+            {action === 'merge' && "Only songs not already in the YouTube playlist will be added, maintaining their position in the playlist order."}
+            {action === 'overwrite' && "The existing YouTube playlist will be completely replaced with the current Spotify version, including all tracks and order."}
+            {action === 'create' && "A new playlist will be created with the same name (plus ' (2)'), keeping the current track order."}
             {action === 'skip' && "This playlist will not be transferred."}
           </Typography>
         </Box>
